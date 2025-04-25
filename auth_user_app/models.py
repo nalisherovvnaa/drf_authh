@@ -12,7 +12,6 @@ class CustomUserManager(BaseUserManager):
             is_superuser=is_superuser
             )
         
-        """BaseUserManager classida is_active=True holatda bo'ladi."""
 
         user.set_password(password)
         user.save()

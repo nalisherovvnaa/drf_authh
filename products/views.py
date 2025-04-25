@@ -10,7 +10,6 @@ from rest_framework.authentication import TokenAuthentication
 # Create your views here.
 
 class CarsListView(generics.GenericAPIView):
-    # permission_classes = permissions.IsAuthenticated,
     authentication_classes = TokenAuthentication,
 
     def get(self, request, *args, **kwargs):
@@ -150,7 +149,6 @@ class CarDeleteView(APIView):
             return Response(response)
     
 
-# Viewsets orqali yozilgan view
 class CarsViewSets(viewsets.ModelViewSet):
     queryset = Car.objects.all()
     serializer_class = CarSerializer

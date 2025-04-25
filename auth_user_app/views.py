@@ -11,6 +11,10 @@ import uuid
 import string
 from methodism import METHODISM
 from auth_user_app import methods
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import threading
+
 
 
 class Main(METHODISM):
@@ -22,12 +26,10 @@ class Main(METHODISM):
 
 
 def validate_phone_number(phone_):
-    """Telefon raqam validatsiyadan o'tsa True qaytaradi"""
     phone = str(phone_)
     return len(phone) == 12 and isinstance(phone_, int) and phone[:3] == '998'
 
 def validate_password(password):
-    """Parol validatsiyadan o'tsa True qaytaradi"""
     return 6 <= len(password) <= 128 and any(map(lambda x:x.isupper(), password)) and any(map(lambda x:x.islower(), password)) and ' ' not in password
 
 # Create your views here.
@@ -36,7 +38,6 @@ class RegisterView(APIView):
     def post(self, request):
         data = request.data
 
-        # Telefon raqam va password kiritlganligini tekshiruvchi shartli qism
         if 'key' not in data or 'password' not in data:
             return Response(
                 {'Message': 'Key yoki parol kiritilmagan.'},
@@ -47,41 +48,36 @@ class RegisterView(APIView):
 
         if not otp or not otp.is_used:
             return Response(
-                {'Message': 'Siz o\'zinginzni kod bilan tasdiqlamagansiz.'},
+                {'Message': 'Sz ozinginzni kod bilan tasdiqlamagansiz.'},
                 status=status.HTTP_400_BAD_REQUEST
                 )
 
         phone = CustomUser.objects.filter(phone=otp.phone)
 
-        # Avval bu telefon raqam orqali ro'yxatdan o'tilmaganligini tekshiruvchi shartli qism
         if phone:
             return Response(
-                {'Message': 'Bu telefon raqam bilan avval ro\'yxatdan o\'tilgan'},
+                {'Message': 'Bu telefon raqam bilan avval royxatdan otilgan'},
                 status=status.HTTP_400_BAD_REQUEST
                 )
         
-        # Parolni validatsiyadan o'tkazadi
         if not validate_password(data['password']):
             return Response(
                 {"Message": 'Parol talabga javob bermaydi, boshqa parol kiriting.'},
                 status=status.HTTP_400_BAD_REQUEST
                 )
 
-        # Yuqoridagi shartlarni qanoatlantirgach foydalanuvchi ma'lumotlarini user_data nomli o'zgaruvchiga tenglashtirib oladi
         user_data = {
             'phone': otp.phone,
             'password': data['password'],
             'name': data.get('name', '')
             }
 
-        # Agar `key'   `123` qiymatiga teng bo'lsa user_data ni yangilaydi
         if data.get('secret_key', '') == '123':
             user_data.update({
                 'is_staff': True,
                 'is_superuser': True
             })
         
-        # `key` yuborilmagan holatda yoki noto'g'ri `key` yuborilgan holatda oddiy foydalanuvchi yaratiladi
         user = CustomUser.objects.create_user(**user_data)
         Token.objects.create(user=user)
         return Response(
@@ -139,7 +135,6 @@ class ProfileView(APIView):
     permission_classes = IsAuthenticated,
     authentication_classes = TokenAuthentication,
 
-    # Foydalanuvchining [phone, name, is_active, is_staff, is_superuser] ma'lumotlarini qaytaradi
     def get(self, request):
         user = request.user
         return Response(
@@ -148,10 +143,7 @@ class ProfileView(APIView):
             )
  
     def patch(self, request):
-        """
-        Foydalanuvchining telefon nomeri va ismini o'zgartiradi, 
-        agar yuborilayotgan ma'lumotlar ichida `secret_key` mavjud va u to'g'ri bo'lsa superuser ga o'zgartiriladi.
-        """
+
         data = request.data
         user = request.user
 
@@ -167,7 +159,6 @@ class ProfileView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
                 )
        
-        # data['phone'] = str(data['phone'])
         user_ = CustomUser.objects.filter(phone=data['phone']).first()
 
         if user_ and user != user_:
@@ -245,27 +236,16 @@ class FirstStepAuthView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
                 )
         
-        # Telefon raqamni validatsiya qilish qismi
         if not validate_phone_number(data['phone']):
             return Response(
                 {"Message": 'Telefon raqamni tekshirib qaytadan kiriting.'},
                 status=status.HTTP_400_BAD_REQUEST  
                 )
         
-        """
-        random.randint dan foydalanib tuzilgan 4 xonali mijozga jo'natiladigan kod
-        """
-        # code_ = ''.join([str(randint(100000, 999999))[-1] for _ in range(4)])
-
-
-        """
-        Mijozga sms orqali yuborish uchun barcha raqamlar,
-        kichik va katta harflarni qatnashtirib 6 xonali kodni random tarzda tanlab oladi.
-        """
         chars = string.digits + string.ascii_letters
         code = ''.join([chars[randint(0, len(chars)-1)] for _ in range(6)])
         key = str(uuid.uuid4()) + code
-
+        send_to_mail(request, 'volidamlola@gmail.com, code')
         otp = OTP.objects.create(phone=data['phone'], key=key)
         
         return Response({
@@ -334,3 +314,35 @@ class SecondStepAuthView(APIView):
             'is_registered': user is not None},
             status=status.HTTP_200_OK
             )
+
+def send_mail(email):
+    print(f"Sending verification email to {email}...")
+
+def is_email(user_input):
+    return "@" in user_input and "." in user_input.split("@")[-1]
+
+def is_phone(user_input):
+    return user_input.startswith("+") and user_input[1:].isdigit() or user_input.isdigit()
+
+@csrf_exempt 
+def authorize_user(request):
+    if request.method == 'POST':
+        user_input = request.POST.get('contact')
+
+        if not user_input:
+            return JsonResponse({"error": "Kontakt ma'lumotlari kiritilmadi."}, status=400)
+
+        if is_email(user_input):
+            thread = threading.Thread(target=send_mail, args=(user_input,))
+            thread.start()
+            return JsonResponse({"message": "Email yuborildi", "type": "email"})
+        
+        elif is_phone(user_input):
+            code = "1234"
+            print(f"{user_input} raqamiga tasdiqlovchi kod yuborildi: {code}")
+            return JsonResponse({"message": "Kod yuborildi", "type": "phone"})
+        
+        else:
+            return JsonResponse({"error": "Notogri email yoki telefon raqam formati."}, status=400)
+    
+    return JsonResponse({"error": "Faqat POST so'rovlar qabul qilinadi."}, status=405)

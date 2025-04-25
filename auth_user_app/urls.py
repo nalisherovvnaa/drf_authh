@@ -19,4 +19,5 @@ urlpatterns = [
     path('password/change', PasswordChangeView.as_view()),
     path('auth/first-step', FirstStepAuthView.as_view()),
     path('auth/second-step', SecondStepAuthView.as_view()),
+    
 ]
